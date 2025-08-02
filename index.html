@@ -95,8 +95,9 @@
               `;
                     const maxYearResult = db.exec(maxYearQuery);
                     const maxYear = maxYearResult.length > 0 ? maxYearResult[0].values[0][0] : new Date().getFullYear();
-
-                    const year = maxYear || new Date().getFullYear();
+                    const urlParams = new URLSearchParams(window.location.search);
+                    
+                    const year = urlParams.get('y') || maxYear || new Date().getFullYear();
 
                     // คิวรีข้อมูลรายเดือน
                     const monthlyQuery = `

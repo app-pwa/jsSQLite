@@ -73,21 +73,19 @@
         <script>
             document.getElementById('fileToUpload').addEventListener('change', async (event) => {
                 const file = event.target.files[0];
-                if (!file)
-                    return;
+      if (!file) return;
 
-                // อ่านไฟล์เป็น ArrayBuffer
-                const arrayBuffer = await file.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
+      // อ่านไฟล์เป็น ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
 
-                // โหลด SQL.js
-                const SQL = await initSqlJs({
-                    locateFile: () => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/sql-wasm.wasm'
-                });
+      // ✅ โหลด SQL.js
+      const SQL = await initSqlJs({
+        locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`
+      });
 
-                // สร้างฐานข้อมูลจากไฟล์
-                const db = new SQL.Database(uint8Array);
-
+      // สร้างฐานข้อมูลจากไฟล์
+      const db = new SQL.Database(uint8Array);
                 try {
                     // คิวรีข้อมูลปีสูงสุด
                     const maxYearQuery = `

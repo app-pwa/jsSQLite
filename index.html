@@ -2,7 +2,9 @@
 <html>
     <head>
         <meta charset="UTF-8">
-        <title>SQL.js + Highcharts Example</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SQL.js + Highcharts Example - PWA</title>
+        <link rel="manifest" href="manifest.json">
         <style type="text/css">
             .highcharts-figure,
             .highcharts-data-table table {
@@ -49,12 +51,38 @@
             .highcharts-data-table tr:hover {
                 background: #f1f7ff;
             }
+            .status-bar {
+                padding: 10px;
+                margin: 10px 0;
+                background-color: #f0f0f0;
+                border-radius: 5px;
+                text-align: center;
+            }
+            .btn {
+                background-color: #4CAF50;
+                border: none;
+                color: white;
+                padding: 10px 15px;
+                text-align: center;
+                text-decoration: none;
+                display: inline-block;
+                font-size: 16px;
+                margin: 4px 2px;
+                cursor: pointer;
+                border-radius: 5px;
+            }
         </style>
     </head>
     <body>
         <figure class="highcharts-figure">
+            <h1>ระบบวิเคราะห์ข้อมูลสละ (PWA)</h1>
+            <div class="status-bar" id="status">สถานะ: พร้อมใช้งาน</div>
+            
             <label for="fileToUpload">เลือกไฟล์ SQLite:</label>
             <input type="file" id="fileToUpload">
+            <button class="btn" id="clearData">ล้างข้อมูลทั้งหมด</button>
+            <button class="btn" id="loadDemo">โหลดข้อมูลตัวอย่าง</button>
+            
             <div id="container"></div>
             <div id="container2"></div>
             <div id="container3"></div>
@@ -71,28 +99,135 @@
         <script src="https://code.highcharts.com/modules/accessibility.js"></script>
 
         <script>
-            document.getElementById('fileToUpload').addEventListener('change', async (event) => {
-                const file = event.target.files[0];
-      if (!file) return;
+            // ตั้งค่า PWA
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('sw.js')
+                        .then((registration) => {
+                            console.log('ServiceWorker registered with scope:', registration.scope);
+                        })
+                        .catch((error) => {
+                            console.log('ServiceWorker registration failed:', error);
+                        });
+                });
+            }
 
-      // อ่านไฟล์เป็น ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
+            // ตัวแปร global
+            let db = null;
+            let SQL = null;
 
-      // ✅ โหลด SQL.js
-      const SQL = await initSqlJs({
-        locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`
-      });
+            // เปิด IndexedDB
+            const openIndexedDB = () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open('SalaDatabase', 1);
+                    
+                    request.onerror = (event) => {
+                        reject('Error opening IndexedDB:', event.target.error);
+                    };
+                    
+                    request.onsuccess = (event) => {
+                        resolve(event.target.result);
+                    };
+                    
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains('uploadedFiles')) {
+                            db.createObjectStore('uploadedFiles', { keyPath: 'id' });
+                        }
+                    };
+                });
+            };
 
-      // สร้างฐานข้อมูลจากไฟล์
-      const db = new SQL.Database(uint8Array);
+            // บันทึกไฟล์ลงใน IndexedDB
+            const saveFileToIndexedDB = async (fileData) => {
                 try {
+                    const indexedDB = await openIndexedDB();
+                    const transaction = indexedDB.transaction(['uploadedFiles'], 'readwrite');
+                    const store = transaction.objectStore('uploadedFiles');
+                    
+                    // ลบข้อมูลเก่าทั้งหมด
+                    store.clear();
+                    
+                    // บันทึกข้อมูลใหม่
+                    const request = store.add({
+                        id: 1,
+                        data: fileData,
+                        timestamp: new Date().getTime()
+                    });
+                    
+                    return new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve();
+                        request.onerror = (event) => reject(event.target.error);
+                    });
+                } catch (error) {
+                    console.error('Error saving file to IndexedDB:', error);
+                    throw error;
+                }
+            };
+
+            // โหลดไฟล์จาก IndexedDB
+            const loadFileFromIndexedDB = async () => {
+                try {
+                    const indexedDB = await openIndexedDB();
+                    const transaction = indexedDB.transaction(['uploadedFiles'], 'readonly');
+                    const store = transaction.objectStore('uploadedFiles');
+                    const request = store.get(1);
+                    
+                    return new Promise((resolve, reject) => {
+                        request.onsuccess = (event) => {
+                            if (event.target.result) {
+                                resolve(event.target.result.data);
+                            } else {
+                                resolve(null);
+                            }
+                        };
+                        request.onerror = (event) => reject(event.target.error);
+                    });
+                } catch (error) {
+                    console.error('Error loading file from IndexedDB:', error);
+                    return null;
+                }
+            };
+
+            // ลบข้อมูลทั้งหมดจาก IndexedDB
+            const clearIndexedDB = async () => {
+                try {
+                    const indexedDB = await openIndexedDB();
+                    const transaction = indexedDB.transaction(['uploadedFiles'], 'readwrite');
+                    const store = transaction.objectStore('uploadedFiles');
+                    store.clear();
+                    
+                    // ลบกราฟทั้งหมด
+                    ['container', 'container2', 'container3', 'container4', 'container5', 'container6', 'container7'].forEach(id => {
+                        const container = document.getElementById(id);
+                        if (container) {
+                            container.innerHTML = '';
+                        }
+                    });
+                    
+                    document.getElementById('status').textContent = 'สถานะ: ลบข้อมูลเรียบร้อยแล้ว';
+                    setTimeout(() => {
+                        document.getElementById('status').textContent = 'สถานะ: พร้อมใช้งาน';
+                    }, 2000);
+                } catch (error) {
+                    console.error('Error clearing IndexedDB:', error);
+                }
+            };
+
+            // ประมวลผลข้อมูลและสร้างกราฟ
+            const processDataAndCreateCharts = (uint8Array) => {
+                document.getElementById('status').textContent = 'สถานะ: กำลังประมวลผลข้อมูล...';
+                
+                try {
+                    // สร้างฐานข้อมูลจากไฟล์
+                    const db = new SQL.Database(uint8Array);
+                    
                     // คิวรีข้อมูลปีสูงสุด
                     const maxYearQuery = `
-                SELECT max(strftime('%Y', datetime(date / 1000, 'unixepoch'))) AS max_date
-                FROM income_or_expense 
-                WHERE category = 'สละ'
-              `;
+                        SELECT max(strftime('%Y', datetime(date / 1000, 'unixepoch'))) AS max_date
+                        FROM income_or_expense 
+                        WHERE category = 'สละ'
+                    `;
                     const maxYearResult = db.exec(maxYearQuery);
                     const maxYear = maxYearResult.length > 0 ? maxYearResult[0].values[0][0] : new Date().getFullYear();
                     const urlParams = new URLSearchParams(window.location.search);
@@ -101,13 +236,13 @@
 
                     // คิวรีข้อมูลรายเดือน
                     const monthlyQuery = `
-                SELECT strftime('%Y-%m', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
-                GROUP_CONCAT(from_or_to, ';') as kilo, GROUP_CONCAT(notes, ';') as bath
-                FROM income_or_expense 
-                WHERE category = 'สละ' AND 
-                CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 2
-                GROUP BY 1
-              `;
+                        SELECT strftime('%Y-%m', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
+                        GROUP_CONCAT(from_or_to, ';') as kilo, GROUP_CONCAT(notes, ';') as bath
+                        FROM income_or_expense 
+                        WHERE category = 'สละ' AND 
+                        CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 2
+                        GROUP BY 1
+                    `;
                     const monthlyResult = db.exec(monthlyQuery);
 
                     // ประมวลผลข้อมูล
@@ -160,11 +295,9 @@
                                     monthData2Ban[m] = kiloBan / 1000;
                                 }
 
-
                                 kiyearNi[y] += kiloNi;
                                 kiyearBan[y] += kiloBan;
                             }
-
                         }
                         cate3.push(`ปี${((year - 2) + y)}`);
                         dataYear.push({name: `ปี ${year - y}`, data: monthData});
@@ -177,7 +310,7 @@
                     dataYear3.push({name: 'สวนที่บ้าน', data: [kiyearBan[2] / 1000, kiyearBan[1] / 1000, kiyearBan[0] / 1000]});
                     dataYear3.push({name: 'สวนใน', data: [kiyearNi[2] / 1000, kiyearNi[1] / 1000, kiyearNi[0] / 1000]});
 
-// เพิ่มการประมวลผลข้อมูลสำหรับ container4 ถึง container7
+                    // เพิ่มการประมวลผลข้อมูลสำหรับ container4 ถึง container7
                     const cate4 = [];
                     const cate5 = [];
                     const bathKo = [];
@@ -186,13 +319,13 @@
                     const bathKasa5 = [];
 
                     const yearlyQuery = `
-  SELECT strftime('%Y-%d-%m', datetime(date / 1000, 'unixepoch')) AS date_col, value as total,
-  from_or_to as kilo, notes as bath
-  FROM income_or_expense 
-  WHERE category = 'สละ' AND 
-  CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 1
-  ORDER BY date
-`;
+                        SELECT strftime('%Y-%d-%m', datetime(date / 1000, 'unixepoch')) AS date_col, value as total,
+                        from_or_to as kilo, notes as bath
+                        FROM income_or_expense 
+                        WHERE category = 'สละ' AND 
+                        CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 1
+                        ORDER BY date
+                    `;
                     const yearlyResult = db.exec(yearlyQuery);
 
                     for (const row of yearlyResult[0].values) {
@@ -221,16 +354,16 @@
                         {name: 'กระซ้า', data: bathKasa5}
                     ];
 
-// คิวรีข้อมูลสำหรับ container6 
+                    // คิวรีข้อมูลสำหรับ container6 
                     const avgQuery = `
-  SELECT strftime('%Y', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
-  GROUP_CONCAT(REPLACE(from_or_to, '/', ';'), ';') as kilo, GROUP_CONCAT(notes, ';') as bath
-  FROM income_or_expense 
-  WHERE category = 'สละ' AND 
-  CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 4
-  GROUP BY 1
-  ORDER BY date
-`;
+                        SELECT strftime('%Y', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
+                        GROUP_CONCAT(REPLACE(from_or_to, '/', ';'), ';') as kilo, GROUP_CONCAT(notes, ';') as bath
+                        FROM income_or_expense 
+                        WHERE category = 'สละ' AND 
+                        CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 4
+                        GROUP BY 1
+                        ORDER BY date
+                    `;
                     const avgResult = db.exec(avgQuery);
 
                     const bathAvg = [];
@@ -268,37 +401,29 @@
                         const avgChoVal = count > 0 ? choSum / count : 0;
                         const avgSaVal = count > 0 ? saSum / count : 0;
                         
-//                        if (dateCol >= 2023) {
-//                            cate7.push(`ปี ${dateCol}`);
-//                                               avgCho.push(avgChoVal);
-//                                               avgSa.push(avgSaVal);
-//                       }
-
-                        
-                        if (dateCol  ==  '2021') {
-                                 bathAvg.push(  [
-                                    `${(total / 100000).toFixed(2)} แสน (${dateCol})`, 36
-                                 ]);
-                        }else{
-                             bathAvg.push(  [
-                                `${(total / 100000).toFixed(2)} แสน (${dateCol})`,  totalKilo > 0 ? parseInt( (total / totalKilo).toFixed(2)) : 0
-                             ]);
+                        if (dateCol == '2021') {
+                            bathAvg.push([
+                                `${(total / 100000).toFixed(2)} แสน (${dateCol})`, 36
+                            ]);
+                        } else {
+                            bathAvg.push([
+                                `${(total / 100000).toFixed(2)} แสน (${dateCol})`, totalKilo > 0 ? parseInt((total / totalKilo).toFixed(2)) : 0
+                            ]);
                         }
-                       
                     }
 
                     const dataYear6 = bathAvg;
                     
                     // คิวรีข้อมูลสำหรับ container6 และ container7
                     const avgQuery7 = `
-  SELECT strftime('%Y', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
-  GROUP_CONCAT(REPLACE(from_or_to, '/', ';'), ';') as kilo, GROUP_CONCAT(notes, ';') as bath
-  FROM income_or_expense 
-  WHERE category = 'สละ' AND 
-  CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 2
-  GROUP BY 1
-  ORDER BY date
-`;
+                        SELECT strftime('%Y', datetime(date / 1000, 'unixepoch')) AS date_col, sum(value) as total,
+                        GROUP_CONCAT(REPLACE(from_or_to, '/', ';'), ';') as kilo, GROUP_CONCAT(notes, ';') as bath
+                        FROM income_or_expense 
+                        WHERE category = 'สละ' AND 
+                        CAST(strftime('%Y', 'now') as int) - CAST(strftime('%Y', datetime(date / 1000, 'unixepoch')) as int) <= 2
+                        GROUP BY 1
+                        ORDER BY date
+                    `;
                     const avgResult7 = db.exec(avgQuery7);
                     
                     const bathAvg7 = []; // ปี
@@ -330,25 +455,29 @@
                             cate7.push(`ปี ${dateCol}`);
                             avgA.push(avgChoVal);
                             avgB.push(avgSaVal);
-                       }
-
-
+                        }
                     }
+                    
                     const dataYear7 = [
                         {name: 'ช่อสวย', data: avgA},
                         {name: 'กระซ้า', data: avgB}
                     ];
-                    console.info(dataYear7);
-//                    console.info(dataYear6);
-//                      console.info(dataYear3);
+
                     // สร้างกราฟด้วย Highcharts
-                    createCharts(dataYear, dataYear2, dataYear3, cate, cate3,dataYear4, dataYear5, dataYear6, dataYear7, cate4, cate5, cate7);
+                    createCharts(dataYear, dataYear2, dataYear3, cate, cate3, dataYear4, dataYear5, dataYear6, dataYear7, cate4, cate5, cate7);
+                    
+                    document.getElementById('status').textContent = 'สถานะ: ประมวลผลข้อมูลเสร็จสิ้น';
+                    setTimeout(() => {
+                        document.getElementById('status').textContent = 'สถานะ: พร้อมใช้งาน';
+                    }, 3000);
                 } catch (error) {
                     console.error(error);
+                    document.getElementById('status').textContent = 'สถานะ: เกิดข้อผิดพลาดในการประมวลผล';
                 }
-            });
+            };
 
-            function createCharts(dataYear, dataYear2, dataYear3, cate, cate3,dataYear4, dataYear5, dataYear6, dataYear7, cate4, cate5, cate7) {
+            // สร้างกราฟ
+            function createCharts(dataYear, dataYear2, dataYear3, cate, cate3, dataYear4, dataYear5, dataYear6, dataYear7, cate4, cate5, cate7) {
                 Highcharts.chart('container', {
                     chart: {type: 'column'},
                     title: {text: 'ยอดขายสละทั้ง 2สวนย้อนหลัง 3ปี'},
@@ -372,6 +501,7 @@
                     yAxis: {title: {text: 'จำนวนตัน'}},
                     series: dataYear3
                 });
+                
                 Highcharts.chart('container4', {
                     chart: {type: 'line'},
                     title: {text: 'ราคาสละปีที่ล่าสุด'},
@@ -401,18 +531,18 @@
                     legend: {enabled: false},
                     tooltip: {pointFormat: 'ค่าเฉลี่ย <b>{point.y:.1f} บาท/กิโลกรัม</b>'},
                     series: [{
-                            name: 'ยอดขายและราคาเฉลี่ย',
-                            data: dataYear6,
-                            dataLabels: {
-                                enabled: true,
-                                rotation: -90,
-                                color: '#FFFFFF',
-                                align: 'right',
-                                format: '{point.y:.1f}',
-                                y: 10,
-                                style: {fontSize: '13px', fontFamily: 'Verdana, sans-serif'}
-                            }
-                        }]
+                        name: 'ยอดขายและราคาเฉลี่ย',
+                        data: dataYear6,
+                        dataLabels: {
+                            enabled: true,
+                            rotation: -90,
+                            color: '#FFFFFF',
+                            align: 'right',
+                            format: '{point.y:.1f}',
+                            y: 10,
+                            style: {fontSize: '13px', fontFamily: 'Verdana, sans-serif'}
+                        }
+                    }]
                 });
 
                 Highcharts.chart('container7', {
@@ -427,6 +557,53 @@
                     series: dataYear7
                 });
             }
+
+            // ฟังก์ชันหลักเมื่อโหลดหน้าเว็บ
+            window.addEventListener('load', async () => {
+                try {
+                    // โหลด SQL.js
+                    SQL = await initSqlJs({
+                        locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`
+                    });
+                    
+                    // พยายามโหลดข้อมูลจาก IndexedDB
+                    const savedFileData = await loadFileFromIndexedDB();
+                    if (savedFileData) {
+                        document.getElementById('status').textContent = 'สถานะ: กำลังโหลดข้อมูลจากฐานข้อมูลท้องถิ่น...';
+                        processDataAndCreateCharts(savedFileData);
+                    }
+                } catch (error) {
+                    console.error('Error initializing app:', error);
+                }
+
+                // อีเวนต์เมื่อผู้ใช้เลือกไฟล์
+                document.getElementById('fileToUpload').addEventListener('change', async (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    document.getElementById('status').textContent = 'สถานะ: กำลังอัปโหลดและประมวลผลไฟล์...';
+                    
+                    // อ่านไฟล์เป็น ArrayBuffer
+                    const arrayBuffer = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    
+                    // บันทึกลงใน IndexedDB
+                    await saveFileToIndexedDB(uint8Array);
+                    
+                    // ประมวลผลข้อมูล
+                    processDataAndCreateCharts(uint8Array);
+                });
+
+                // อีเวนต์สำหรับล้างข้อมูล
+                document.getElementById('clearData').addEventListener('click', clearIndexedDB);
+                
+                // อีเวนต์สำหรับโหลดข้อมูลตัวอย่าง (สำหรับการทดสอบ)
+                document.getElementById('loadDemo').addEventListener('click', async () => {
+                    // ตัวอย่างการโหลดข้อมูลสาธิต (ในที่นี้ให้อัปโหลดไฟล์ตัวอย่าง)
+                    document.getElementById('status').textContent = 'สถานะ: กำลังโหลดข้อมูลตัวอย่าง...';
+                    alert('คุณต้องมีไฟล์ SQLite ตัวอย่างสำหรับใช้งานฟีเจอร์นี้');
+                });
+            });
         </script>
     </body>
 </html>
